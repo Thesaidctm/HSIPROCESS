@@ -22,6 +22,11 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+## Execução rápida
+```bash
+pip install -r requirements.txt && streamlit run app.py
+```
+
 ## Observações importantes (ENVI)
 - Faça upload do **`.hdr`** no app.
 - O arquivo binário correspondente (`.raw` / `.dat`) precisa estar **na mesma pasta** e com o nome que o header espera.
