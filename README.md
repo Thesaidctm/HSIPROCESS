@@ -7,6 +7,8 @@ Interface simples (MVP) para abrir cubos hiperespectrais **ENVI** (`.hdr` + `.ra
 - Cada seleção armazena `id`, `nome` (`capture.001`, `capture.002`, ...), `cor` (hex), `tipo` (`rect`) e coordenadas (`x0`, `y0`, `x1`, `y1`).
 - É possível selecionar ROI ativa, renomear, deletar e alternar visibilidade (ícone de olho).
 - O estado das seleções é persistido em `st.session_state` durante a sessão do app.
+- A ROI ativa também pode ser desenhada diretamente na imagem com um retângulo interativo por dois cliques na imagem.
+- A imagem pseudo-RGB mostra contorno colorido de cada ROI visível e um pequeno "carimbo" preenchido com a cor da seleção.
 
 ## Requisitos
 - Python 3.10+ (recomendado)

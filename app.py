@@ -3,6 +3,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
+from PIL import Image, ImageDraw
+from streamlit_image_coordinates import streamlit_image_coordinates
 
 from spectral import open_image
 
@@ -21,6 +23,8 @@ def init_selection_state() -> None:
     st.session_state.setdefault("active_selection_id", None)
     st.session_state.setdefault("rename_selection_id", None)
     st.session_state.setdefault("pending_selection_name", "")
+    st.session_state.setdefault("roi_anchors", {})
+    st.session_state.setdefault("last_roi_clicks", {})
 
 
 def next_selection_color() -> str:
@@ -56,6 +60,45 @@ def get_active_selection():
         if sel["id"] == active_id:
             return sel
     return None
+
+
+def hex_to_rgba(hex_color: str, alpha: int = 255) -> tuple[int, int, int, int]:
+    """Convert HEX color string to RGBA tuple."""
+    hex_color = hex_color.lstrip("#")
+    return tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4)) + (alpha,)
+
+
+def make_selection_overlay(rgb: np.ndarray, selections: list[dict]) -> Image.Image:
+    """Draw ROI contour and color stamp for each visible selection over pseudo-RGB."""
+    base = (np.clip(rgb, 0.0, 1.0) * 255).astype(np.uint8)
+    image = Image.fromarray(base)
+    draw = ImageDraw.Draw(image, "RGBA")
+
+    for sel in selections:
+        if not sel["visible"]:
+            continue
+
+        x0 = min(sel["coords"]["x0"], sel["coords"]["x1"])
+        x1 = max(sel["coords"]["x0"], sel["coords"]["x1"])
+        y0 = min(sel["coords"]["y0"], sel["coords"]["y1"])
+        y1 = max(sel["coords"]["y0"], sel["coords"]["y1"])
+
+        color_rgba = hex_to_rgba(sel["color"], alpha=255)
+        draw.rectangle([x0, y0, x1, y1], outline=color_rgba, width=2)
+
+        stamp_size = 10
+        stamp_x0 = min(x0 + 3, image.width - stamp_size - 1)
+        stamp_y0 = min(y0 + 3, image.height - stamp_size - 1)
+        draw.rectangle(
+            [stamp_x0, stamp_y0, stamp_x0 + stamp_size, stamp_y0 + stamp_size],
+            fill=hex_to_rgba(sel["color"], alpha=220),
+            outline=(255, 255, 255, 255),
+            width=1,
+        )
+
+    return image
+
+
 
 @st.cache_data(show_spinner=False)
 def load_envi(hdr_path: str):
@@ -250,7 +293,8 @@ with colA:
         b = st.slider("Banda B (índice)", 0, bands-1, int(0.25 * (bands-1)))
 
     rgb = make_rgb(cube, r, g, b, clip_percent=clip_p)
-    st.image(rgb, caption="Pseudo-RGB (normalizado)")
+    overlay_image = make_selection_overlay(rgb, st.session_state["selections"])
+    st.image(overlay_image, caption="Pseudo-RGB com ROIs e carimbos")
 
     st.markdown("### Inspeção de pixel")
     c1, c2, _ = st.columns([1, 1, 1])
@@ -285,7 +329,7 @@ with colA:
 st.divider()
 
 st.subheader("ROI simples (retângulo) e espectro médio")
-st.caption("MVP: ROI retangular com gerenciamento de Selections na barra lateral.")
+st.caption("MVP: desenhe a ROI da seleção ativa diretamente sobre a imagem.")
 
 active_sel = get_active_selection()
 
@@ -294,6 +338,44 @@ if active_sel is None:
     st.stop()
 
 coords = active_sel["coords"]
+
+st.markdown("### Editor de ROI (retângulo)")
+st.caption("Clique em dois pontos sobre a imagem: primeiro canto inicial, depois canto oposto.")
+
+sel_id = active_sel["id"]
+anchor = st.session_state["roi_anchors"].get(sel_id)
+
+clicked = streamlit_image_coordinates(
+    overlay_image,
+    key=f"roi_click_{sel_id}",
+    width=cols,
+)
+
+if clicked is not None:
+    click_xy = (int(np.clip(clicked["x"], 0, cols - 1)), int(np.clip(clicked["y"], 0, rows - 1)))
+    if st.session_state["last_roi_clicks"].get(sel_id) != click_xy:
+        st.session_state["last_roi_clicks"][sel_id] = click_xy
+        if anchor is None:
+            st.session_state["roi_anchors"][sel_id] = click_xy
+            st.info(f"1º ponto registrado em x={click_xy[0]}, y={click_xy[1]}. Clique no canto oposto.")
+        else:
+            x0_new, y0_new = anchor
+            x1_new, y1_new = click_xy
+            active_sel["coords"] = {
+                "x0": int(min(x0_new, x1_new)),
+                "y0": int(min(y0_new, y1_new)),
+                "x1": int(max(x0_new, x1_new)),
+                "y1": int(max(y0_new, y1_new)),
+            }
+            st.session_state["roi_anchors"][sel_id] = None
+            coords = active_sel["coords"]
+            st.rerun()
+
+if st.session_state["roi_anchors"].get(sel_id) is not None:
+    pt = st.session_state["roi_anchors"][sel_id]
+    st.caption(f"Aguardando 2º ponto. Canto inicial: x={pt[0]}, y={pt[1]}.")
+if st.button("Limpar ponto inicial da ROI", key=f"clear_anchor_{sel_id}"):
+    st.session_state["roi_anchors"][sel_id] = None
 
 cR1, cR2, cR3, cR4 = st.columns(4)
 with cR1:
